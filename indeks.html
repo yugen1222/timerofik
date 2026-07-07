@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Таймер номерков</title>
+
+<style>
+body{
+  margin:0;
+  padding:20px;
+  background:#111827;
+  font-family:Arial,sans-serif;
+  color:white;
+}
+h1{text-align:center;}
+.panel{
+  background:#1f2937;
+  padding:18px;
+  border-radius:18px;
+  display:flex;
+  gap:10px;
+  justify-content:center;
+  flex-wrap:wrap;
+  margin-bottom:20px;
+}
+input{
+  padding:14px;
+  font-size:24px;
+  width:180px;
+  text-align:center;
+  border:none;
+  border-radius:12px;
+}
+button{
+  padding:12px 18px;
+  font-size:18px;
+  border:none;
+  border-radius:12px;
+  cursor:pointer;
+}
+.add-btn{background:#2563eb;color:white;}
+.sound-btn{background:#9333ea;color:white;}
+.reset-btn,.delete-btn{
+  background:#111827;
+  color:white;
+  width:100%;
+  margin-top:8px;
+}
+.orders{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(240px,1fr));
+  gap:15px;
+}
+.card{
+  padding:20px;
+  border-radius:22px;
+  text-align:center;
+  background:#374151;
+}
+.free{background:#374151;}
+.green{background:#16a34a;}
+.yellow{background:#f59e0b;}
+.red{
+  background:#dc2626;
+  animation:blink 1s infinite;
+}
+@keyframes blink{50%{opacity:0.75;}}
+.number{font-size:46px;font-weight:bold;}
+.time{font-size:52px;margin:12px 0;font-weight:bold;}
+.status{font-size:28px;font-weight:bold;}
+</style>
+</head>
+
+<body>
+
+<h1>Таймер номерков</h1>
+
+<div class="panel">
+  <input type="number" id="numberInput" placeholder="Номерок">
+
+  <button class="add-btn" onclick="addNumber()">Добавить номерок</button>
+
+  <button class="sound-btn" onclick="enableSound()">🔊 Включить звук</button>
+</div>
+
+<div class="orders" id="orders"></div>
+
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyDt1NFn_A3ryqgkgcTLOrKphOaWZnRFGEE",
+  authDomain: "timerofik.firebaseapp.com",
+  databaseURL: "https://timerofik-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "timerofik",
+  storageBucket: "timerofik.firebasestorage.app",
+  messagingSenderId: "599914248706",
+  appId: "1:599914248706:web:b40c402d24e4de7331051b",
+  measurementId: "G-F1H5SHKNHC"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+const READY_SOUND = "Заказ готов.mp3";
+const TAKE_SOUND = "Нужно забрать.mp3";
+
+let soundEnabled = false;
+let numbersData = {};
+let audioSession = 0;
+let yellowPlayed = {};
+let redPlayed = {};
+let redRepeatTimers = {};
+
+function enableSound(){
+  soundEnabled = true;
+
+  const audio = new Audio(READY_SOUND);
+  audio.volume = 0.01;
+
+  audio.play()
+    .then(() => {
+      audio.pause();
+      audio.currentTime = 0;
+      alert("Звук включен");
+    })
+    .catch(() => {
+      alert("Проверьте MP3-файлы и нажмите ещё раз");
+    });
+}
+
+function isActiveNumber(number){
+  return numbersData[number] && numbersData[number].active === true;
+}
+
+function playAudioManyTimes(fileName, count, number){
+  if(!soundEnabled) return;
+
+  const thisSession = audioSession;
+  let played = 0;
+
+  function playNext(){
+    if(played >= count) return;
+    if(thisSession !== audioSession) return;
+    if(!isActiveNumber(number)) return;
+
+    const audio = new Audio(fileName);
+    audio.volume = 1;
+
+    audio.play().catch(err => console.log("Ошибка звука:", err));
+
+    audio.onended = () => {
+      played++;
+      playNext();
+    };
+  }
+
+  playNext();
+}
+
+function formatTime(seconds){
+  const min = Math.floor(seconds / 60);
+  const sec = seconds % 60;
+
+  return String(min).padStart(2,"0") + ":" + String(sec).padStart(2,"0");
+}
+
+function getStatus(seconds){
+  if(seconds < 180){
+    return {className:"card green", text:"НОРМА"};
+  }
+
+  if(seconds < 300){
+    return {className:"card yellow", text:"ПОЗДНО"};
+  }
+
+  return {className:"card red", text:"ДОЛГО"};
+}
+
+function renderNumbers(){
+  const orders = document.getElementById("orders");
+  orders.innerHTML = "";
+
+  const numbers = Object.keys(numbersData).sort((a,b) => Number(a) - Number(b));
+
+  numbers.forEach(number => {
+    const data = numbersData[number];
+    const card = document.createElement("div");
+
+    card.dataset.number = number;
+
+    const isActive = data.active === true;
+    const seconds = isActive && data.startTime
+      ? Math.floor((Date.now() - data.startTime) / 1000)
+      : 0;
+
+    const status = isActive
+      ? getStatus(seconds)
+      : {className:"card free", text:"СВОБОДЕН"};
+
+    card.className = status.className;
+
+    card.innerHTML = `
+      <div class="number">№ ${number}</div>
+      <div class="time">${isActive ? formatTime(seconds) : "00:00"}</div>
+      <div class="status">${status.text}</div>
+
+      <button class="reset-btn">Сбросить</button>
+      <button class="delete-btn">Удалить номерок</button>
+    `;
+
+    orders.appendChild(card);
+
+    card.onclick = function(event){
+      if(event.target.tagName === "BUTTON") return;
+
+      if(!isActiveNumber(number)){
+        startNumber(number);
+      }
+    };
+
+    card.querySelector(".reset-btn").onclick = function(){
+      resetNumber(number);
+    };
+
+    card.querySelector(".delete-btn").onclick = function(){
+      if(isActiveNumber(number)){
+        alert("Сначала сбросьте активный таймер");
+        return;
+      }
+
+      if(confirm("Удалить номерок №" + number + "?")){
+        db.ref("numbers/" + number).remove();
+      }
+    };
+  });
+}
+
+function updateTimers(){
+  const cards = document.querySelectorAll(".card");
+
+  cards.forEach(card => {
+    const number = card.dataset.number;
+    const data = numbersData[number];
+
+    if(!data || data.active !== true || !data.startTime) return;
+
+    const seconds = Math.floor((Date.now() - data.startTime) / 1000);
+    const status = getStatus(seconds);
+
+    card.className = status.className;
+    card.querySelector(".time").textContent = formatTime(seconds);
+    card.querySelector(".status").textContent = status.text;
+
+    if(seconds >= 180 && seconds < 300 && !yellowPlayed[number]){
+      yellowPlayed[number] = true;
+      playAudioManyTimes(READY_SOUND, 3, number);
+    }
+
+    if(seconds >= 300 && !redPlayed[number]){
+      redPlayed[number] = true;
+      playAudioManyTimes(TAKE_SOUND, 5, number);
+
+      if(!redRepeatTimers[number]){
+        redRepeatTimers[number] = setInterval(() => {
+          if(isActiveNumber(number)){
+            playAudioManyTimes(TAKE_SOUND, 5, number);
+          }
+        }, 10000);
+      }
+    }
+  });
+}
+
+function startNumber(number){
+  db.ref("numbers/" + number).update({
+    active: true,
+    startTime: Date.now()
+  });
+}
+
+function resetNumber(number){
+  audioSession++;
+
+  yellowPlayed[number] = false;
+  redPlayed[number] = false;
+
+  if(redRepeatTimers[number]){
+    clearInterval(redRepeatTimers[number]);
+    delete redRepeatTimers[number];
+  }
+
+  db.ref("numbers/" + number).update({
+    active: false,
+    startTime: null
+  });
+}
+
+function addNumber(){
+  const input = document.getElementById("numberInput");
+  const number = input.value.trim();
+
+  if(number === ""){
+    alert("Введите номерок");
+    return;
+  }
+
+  db.ref("numbers/" + number).set({
+    active: false,
+    startTime: null
+  });
+
+  input.value = "";
+  input.focus();
+}
+
+document.getElementById("numberInput").addEventListener("keydown", function(e){
+  if(e.key === "Enter"){
+    addNumber();
+  }
+});
+
+db.ref("numbers").on("value", snapshot => {
+  numbersData = snapshot.val() || {};
+
+  Object.keys(redRepeatTimers).forEach(number => {
+    if(!isActiveNumber(number)){
+      clearInterval(redRepeatTimers[number]);
+      delete redRepeatTimers[number];
+    }
+  });
+
+  renderNumbers();
+});
+
+setInterval(updateTimers, 1000);
+</script>
+
+</body>
+</html>
