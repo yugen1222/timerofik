@@ -8,22 +8,25 @@
 <style>
 body{
   margin:0;
-  padding:20px;
+  padding:18px;
   background:#111827;
   font-family:Arial,sans-serif;
   color:white;
 }
-h1{text-align:center;}
+
+h1{text-align:center;margin:10px 0 18px;}
+
 .panel{
   background:#1f2937;
-  padding:18px;
+  padding:16px;
   border-radius:18px;
   display:flex;
   gap:10px;
   justify-content:center;
   flex-wrap:wrap;
-  margin-bottom:20px;
+  margin-bottom:18px;
 }
+
 input{
   padding:14px;
   font-size:24px;
@@ -32,43 +35,86 @@ input{
   border:none;
   border-radius:12px;
 }
+
 button{
-  padding:12px 18px;
+  padding:12px 16px;
   font-size:18px;
   border:none;
   border-radius:12px;
   cursor:pointer;
 }
+
 .add-btn{background:#2563eb;color:white;}
 .sound-btn{background:#9333ea;color:white;}
-.reset-btn,.delete-btn{
-  background:#111827;
-  color:white;
-  width:100%;
-  margin-top:8px;
+
+.section-title{
+  font-size:28px;
+  font-weight:bold;
+  margin:22px 0 12px;
+  text-align:center;
 }
+
 .orders{
   display:grid;
   grid-template-columns:repeat(auto-fill,minmax(240px,1fr));
   gap:15px;
 }
+
 .card{
   padding:20px;
   border-radius:22px;
   text-align:center;
   background:#374151;
 }
+
 .free{background:#374151;}
 .green{background:#16a34a;}
 .yellow{background:#f59e0b;}
-.red{
-  background:#dc2626;
-  animation:blink 1s infinite;
+.red{background:#dc2626;animation:blink 1s infinite;}
+.pause{background:#2563eb;}
+
+@keyframes blink{
+  50%{opacity:0.75;}
 }
-@keyframes blink{50%{opacity:0.75;}}
-.number{font-size:46px;font-weight:bold;}
-.time{font-size:52px;margin:12px 0;font-weight:bold;}
-.status{font-size:28px;font-weight:bold;}
+
+.number{
+  font-size:46px;
+  font-weight:bold;
+}
+
+.time{
+  font-size:52px;
+  margin:12px 0;
+  font-weight:bold;
+}
+
+.status{
+  font-size:28px;
+  font-weight:bold;
+}
+
+.btn-row{
+  display:flex;
+  gap:8px;
+  margin-top:10px;
+}
+
+.reset-btn,
+.pause-btn,
+.delete-btn{
+  background:#111827;
+  color:white;
+  width:100%;
+  margin-top:8px;
+}
+
+.pause-btn{background:#1e3a8a;}
+.reset-btn{background:#111827;}
+.delete-btn{background:#4b5563;}
+
+.free-card{
+  cursor:pointer;
+}
 </style>
 </head>
 
@@ -79,12 +125,20 @@ button{
 <div class="panel">
   <input type="number" id="numberInput" placeholder="Номерок">
 
-  <button class="add-btn" onclick="addNumber()">Добавить номерок</button>
+  <button class="add-btn" onclick="addNumber()">
+    Добавить номерок
+  </button>
 
-  <button class="sound-btn" onclick="enableSound()">🔊 Включить звук</button>
+  <button class="sound-btn" onclick="enableSound()">
+    🔊 Включить звук
+  </button>
 </div>
 
-<div class="orders" id="orders"></div>
+<div class="section-title">Активные заказы</div>
+<div class="orders" id="activeOrders"></div>
+
+<div class="section-title">Свободные номерки</div>
+<div class="orders" id="freeNumbers"></div>
 
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
@@ -131,10 +185,6 @@ function enableSound(){
     });
 }
 
-function isActiveNumber(number){
-  return numbersData[number] && numbersData[number].active === true;
-}
-
 function playAudioManyTimes(fileName, count, number){
   if(!soundEnabled) return;
 
@@ -142,9 +192,11 @@ function playAudioManyTimes(fileName, count, number){
   let played = 0;
 
   function playNext(){
+    const data = numbersData[number];
+
     if(played >= count) return;
     if(thisSession !== audioSession) return;
-    if(!isActiveNumber(number)) return;
+    if(!data || data.active !== true || data.paused === true) return;
 
     const audio = new Audio(fileName);
     audio.volume = 1;
@@ -160,6 +212,20 @@ function playAudioManyTimes(fileName, count, number){
   playNext();
 }
 
+function getElapsedSeconds(data){
+  if(!data || data.active !== true) return 0;
+
+  const before = data.elapsedBeforePause || 0;
+
+  if(data.paused === true){
+    return before;
+  }
+
+  if(!data.startTime) return before;
+
+  return before + Math.floor((Date.now() - data.startTime) / 1000);
+}
+
 function formatTime(seconds){
   const min = Math.floor(seconds / 60);
   const sec = seconds % 60;
@@ -167,92 +233,137 @@ function formatTime(seconds){
   return String(min).padStart(2,"0") + ":" + String(sec).padStart(2,"0");
 }
 
-function getStatus(seconds){
+function getStatus(data){
+  if(data.paused === true){
+    return {
+      className:"card pause",
+      text:"ПАУЗА"
+    };
+  }
+
+  const seconds = getElapsedSeconds(data);
+
   if(seconds < 180){
-    return {className:"card green", text:"НОРМА"};
+    return {
+      className:"card green",
+      text:"НОРМА"
+    };
   }
 
   if(seconds < 300){
-    return {className:"card yellow", text:"ПОЗДНО"};
+    return {
+      className:"card yellow",
+      text:"ПОЗДНО"
+    };
   }
 
-  return {className:"card red", text:"ДОЛГО"};
+  return {
+    className:"card red",
+    text:"ДОЛГО"
+  };
 }
 
 function renderNumbers(){
-  const orders = document.getElementById("orders");
-  orders.innerHTML = "";
+  const activeBox = document.getElementById("activeOrders");
+  const freeBox = document.getElementById("freeNumbers");
+
+  activeBox.innerHTML = "";
+  freeBox.innerHTML = "";
 
   const numbers = Object.keys(numbersData).sort((a,b) => Number(a) - Number(b));
 
   numbers.forEach(number => {
     const data = numbersData[number];
-    const card = document.createElement("div");
 
-    card.dataset.number = number;
-
-    const isActive = data.active === true;
-    const seconds = isActive && data.startTime
-      ? Math.floor((Date.now() - data.startTime) / 1000)
-      : 0;
-
-    const status = isActive
-      ? getStatus(seconds)
-      : {className:"card free", text:"СВОБОДЕН"};
-
-    card.className = status.className;
-
-    card.innerHTML = `
-      <div class="number">№ ${number}</div>
-      <div class="time">${isActive ? formatTime(seconds) : "00:00"}</div>
-      <div class="status">${status.text}</div>
-
-      <button class="reset-btn">Сбросить</button>
-      <button class="delete-btn">Удалить номерок</button>
-    `;
-
-    orders.appendChild(card);
-
-    card.onclick = function(event){
-      if(event.target.tagName === "BUTTON") return;
-
-      if(!isActiveNumber(number)){
-        startNumber(number);
-      }
-    };
-
-    card.querySelector(".reset-btn").onclick = function(){
-      resetNumber(number);
-    };
-
-    card.querySelector(".delete-btn").onclick = function(){
-      if(isActiveNumber(number)){
-        alert("Сначала сбросьте активный таймер");
-        return;
-      }
-
-      if(confirm("Удалить номерок №" + number + "?")){
-        db.ref("numbers/" + number).remove();
-      }
-    };
+    if(data.active === true){
+      createActiveCard(number, data);
+    } else {
+      createFreeCard(number);
+    }
   });
 }
 
-function updateTimers(){
-  const cards = document.querySelectorAll(".card");
+function createActiveCard(number, data){
+  const activeBox = document.getElementById("activeOrders");
 
-  cards.forEach(card => {
+  const seconds = getElapsedSeconds(data);
+  const status = getStatus(data);
+
+  const card = document.createElement("div");
+  card.className = status.className;
+  card.dataset.number = number;
+
+  const pauseText = data.paused === true ? "▶ Продолжить" : "⏸ Стоп";
+
+  card.innerHTML = `
+    <div class="number">№ ${number}</div>
+    <div class="time">${formatTime(seconds)}</div>
+    <div class="status">${status.text}</div>
+
+    <button class="pause-btn">${pauseText}</button>
+    <button class="reset-btn">Сбросить</button>
+  `;
+
+  activeBox.appendChild(card);
+
+  card.querySelector(".pause-btn").onclick = function(){
+    togglePause(number);
+  };
+
+  card.querySelector(".reset-btn").onclick = function(){
+    resetNumber(number);
+  };
+}
+
+function createFreeCard(number){
+  const freeBox = document.getElementById("freeNumbers");
+
+  const card = document.createElement("div");
+  card.className = "card free free-card";
+  card.dataset.number = number;
+
+  card.innerHTML = `
+    <div class="number">№ ${number}</div>
+    <div class="time">00:00</div>
+    <div class="status">СВОБОДЕН</div>
+
+    <button class="delete-btn">Удалить номерок</button>
+  `;
+
+  freeBox.appendChild(card);
+
+  card.onclick = function(event){
+    if(event.target.tagName === "BUTTON") return;
+    startNumber(number);
+  };
+
+  card.querySelector(".delete-btn").onclick = function(){
+    if(confirm("Удалить номерок №" + number + "?")){
+      db.ref("numbers/" + number).remove();
+    }
+  };
+}
+
+function updateTimers(){
+  const activeCards = document.querySelectorAll("#activeOrders .card");
+
+  activeCards.forEach(card => {
     const number = card.dataset.number;
     const data = numbersData[number];
 
-    if(!data || data.active !== true || !data.startTime) return;
+    if(!data || data.active !== true) return;
 
-    const seconds = Math.floor((Date.now() - data.startTime) / 1000);
-    const status = getStatus(seconds);
+    const seconds = getElapsedSeconds(data);
+    const status = getStatus(data);
 
     card.className = status.className;
     card.querySelector(".time").textContent = formatTime(seconds);
     card.querySelector(".status").textContent = status.text;
+
+    const pauseBtn = card.querySelector(".pause-btn");
+    pauseBtn.textContent = data.paused === true ? "▶ Продолжить" : "⏸ Стоп";
+
+    if(data.paused === true) return;
 
     if(seconds >= 180 && seconds < 300 && !yellowPlayed[number]){
       yellowPlayed[number] = true;
@@ -265,8 +376,13 @@ function updateTimers(){
 
       if(!redRepeatTimers[number]){
         redRepeatTimers[number] = setInterval(() => {
-          if(isActiveNumber(number)){
+          const freshData = numbersData[number];
+
+          if(freshData && freshData.active === true && freshData.paused !== true){
             playAudioManyTimes(TAKE_SOUND, 5, number);
+          } else {
+            clearInterval(redRepeatTimers[number]);
+            delete redRepeatTimers[number];
           }
         }, 10000);
       }
@@ -275,10 +391,50 @@ function updateTimers(){
 }
 
 function startNumber(number){
+  audioSession++;
+
+  yellowPlayed[number] = false;
+  redPlayed[number] = false;
+
+  if(redRepeatTimers[number]){
+    clearInterval(redRepeatTimers[number]);
+    delete redRepeatTimers[number];
+  }
+
   db.ref("numbers/" + number).update({
     active: true,
-    startTime: Date.now()
+    paused: false,
+    startTime: Date.now(),
+    elapsedBeforePause: 0
   });
+}
+
+function togglePause(number){
+  const data = numbersData[number];
+
+  if(!data || data.active !== true) return;
+
+  audioSession++;
+
+  if(data.paused === true){
+    db.ref("numbers/" + number).update({
+      paused: false,
+      startTime: Date.now()
+    });
+  } else {
+    const seconds = getElapsedSeconds(data);
+
+    if(redRepeatTimers[number]){
+      clearInterval(redRepeatTimers[number]);
+      delete redRepeatTimers[number];
+    }
+
+    db.ref("numbers/" + number).update({
+      paused: true,
+      startTime: null,
+      elapsedBeforePause: seconds
+    });
+  }
 }
 
 function resetNumber(number){
@@ -294,7 +450,9 @@ function resetNumber(number){
 
   db.ref("numbers/" + number).update({
     active: false,
-    startTime: null
+    paused: false,
+    startTime: null,
+    elapsedBeforePause: 0
   });
 }
 
@@ -309,7 +467,9 @@ function addNumber(){
 
   db.ref("numbers/" + number).set({
     active: false,
-    startTime: null
+    paused: false,
+    startTime: null,
+    elapsedBeforePause: 0
   });
 
   input.value = "";
@@ -326,7 +486,9 @@ db.ref("numbers").on("value", snapshot => {
   numbersData = snapshot.val() || {};
 
   Object.keys(redRepeatTimers).forEach(number => {
-    if(!isActiveNumber(number)){
+    const data = numbersData[number];
+
+    if(!data || data.active !== true || data.paused === true){
       clearInterval(redRepeatTimers[number]);
       delete redRepeatTimers[number];
     }
